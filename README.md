@@ -41,7 +41,7 @@ An interactive web application that lets you control a mesmerizing 15,000-partic
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/pixaura.git
+git clone https://github.com/princekjha-dev/pixaura.git
 cd pixaura
 ```
 
@@ -178,7 +178,7 @@ SOFTWARE.
 
 **Prince Kumar Jha**
 
-- GitHub: [@yourusername](https://github.com/yourusername)
+- GitHub: [@princekjha-dev](https://github.com/princekjha-dev)
 
 ## 🙏 Acknowledgments
 
