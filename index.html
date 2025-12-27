@@ -3,35 +3,79 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hand Gesture Particle System</title>
-    <link rel="stylesheet" href="styles.css">
+    <title>PixAura - Hand Controlled Particles</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <!-- 3D Container -->
     <div id="container"></div>
-    <video id="video" autoplay playsinline></video>
     
-    <div id="controls">
-        <h3>Hand Gesture Controls</h3>
-        <div>👌 Pinch: Expand & color shift</div>
-        <div>✌️ Peace sign: Switch template</div>
-        <div>✋ Move hand: Rotate particles</div>
-        <div class="template" style="margin-top: 10px;">Template: <span id="currentTemplate">spiral</span></div>
-        <div class="status">Status: <span id="status">Waiting for hand...</span></div>
+    <!-- Hidden Video -->
+    <video id="video" autoplay playsinline style="display: none;"></video>
+    
+    <!-- Top Bar -->
+    <div class="top-bar">
+        <div class="logo">PixAura</div>
+        <div class="status">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="statusText">Initializing...</span>
+        </div>
     </div>
-    
-    <div id="loading">Loading hand tracking...</div>
 
-    <!-- Three.js -->
+    <!-- Video Feed -->
+    <div class="video-box">
+        <div class="video-header">Camera Feed</div>
+        <canvas id="videoCanvas"></canvas>
+    </div>
+
+    <!-- Gesture Guide -->
+    <div class="gestures">
+        <div class="gesture-card">
+            <div class="gesture-icon">👌</div>
+            <div class="gesture-text">
+                <div class="gesture-name">Pinch</div>
+                <div class="gesture-desc">Expand & colors</div>
+            </div>
+        </div>
+        <div class="gesture-card">
+            <div class="gesture-icon">✋</div>
+            <div class="gesture-text">
+                <div class="gesture-name">Move Hand</div>
+                <div class="gesture-desc">Rotate particles</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Info Panel -->
+    <div class="info-panel">
+        <h3>Spiral Galaxy</h3>
+        <p>Move your hand to control particles</p>
+        <div class="controls">
+            <kbd>Space</kbd> Expand
+            <kbd>R</kbd> Reset
+            <kbd>S</kbd> Stats
+        </div>
+    </div>
+
+    <!-- Loading Screen -->
+    <div class="loading" id="loading">
+        <div class="spinner"></div>
+        <h2>Starting PixAura...</h2>
+        <p>Please allow camera access</p>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast">
+        <span id="toastMsg"></span>
+    </div>
+
+    <!-- Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    
-    <!-- MediaPipe Hands -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
     
-    <!-- Main Application Script -->
     <script src="app.js"></script>
 </body>
 </html>
-
