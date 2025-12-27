@@ -1,336 +1,295 @@
-let scene, camera, renderer, particleSystem;
-let particles, particleVelocities = [], targetPositions = [];
-let currentHand = null;
-let currentTemplate = 'spiral';
-let lastGestureChange = 0;
-
-const templates = {
-    spiral: { color: 0x00ffff, count: 2000 },
-    heart: { color: 0xff1493, count: 1500 },
-    flower: { color: 0xff69b4, count: 2000 },
-    saturn: { color: 0xffd700, count: 2500 },
-    fireworks: { color: 0xff4500, count: 3000 },
-    galaxy: { color: 0x9370db, count: 2500 }
+// State
+const state = {
+    camera: null,
+    hands: null,
+    scene: null,
+    camera3d: null,
+    renderer: null,
+    particles: null,
+    geometry: null,
+    material: null,
+    handPosition: { x: 0, y: 0 },
+    isPinching: false,
+    expandFactor: 1,
+    targetExpand: 1,
+    rotationSpeed: { x: 0, y: 0 }
 };
 
-// Initialize Three.js
-function initThree() {
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0a1a);
-    
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.z = 50;
-    
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.getElementById('container').appendChild(renderer.domElement);
-    
-    const ambientLight = new THREE.AmbientLight(0x404040);
-    scene.add(ambientLight);
-    
-    createParticles('spiral');
+// Config
+const CONFIG = {
+    particleCount: 15000,
+    spiralArms: 5,
+    spiralTightness: 0.3,
+    maxRadius: 3,
+    expandSpeed: 0.05,
+    rotationDamping: 0.95,
+    pinchThreshold: 0.05
+};
+
+// Initialize
+async function init() {
+    try {
+        await setupCamera();
+        setupThreeJS();
+        setupMediaPipe();
+        setupEventListeners();
+        animate();
+        hideLoading();
+        updateStatus('Ready', true);
+    } catch (error) {
+        console.error('Initialization error:', error);
+        showToast('Error: ' + error.message);
+        updateStatus('Error', false);
+    }
 }
 
-function createParticles(templateName) {
-    if (particleSystem) {
-        scene.remove(particleSystem);
-        particles.dispose();
+// Setup Camera
+async function setupCamera() {
+    const video = document.getElementById('video');
+    const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480 }
+    });
+    video.srcObject = stream;
+    
+    return new Promise((resolve) => {
+        video.onloadedmetadata = () => resolve();
+    });
+}
+
+// Setup Three.js
+function setupThreeJS() {
+    const container = document.getElementById('container');
+    
+    // Scene
+    state.scene = new THREE.Scene();
+    
+    // Camera
+    state.camera3d = new THREE.PerspectiveCamera(
+        75,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        1000
+    );
+    state.camera3d.position.z = 5;
+    
+    // Renderer
+    state.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    state.renderer.setSize(window.innerWidth, window.innerHeight);
+    state.renderer.setClearColor(0x0f0f23, 1);
+    container.appendChild(state.renderer.domElement);
+    
+    // Create Particles
+    createParticles();
+    
+    // Resize handler
+    window.addEventListener('resize', onResize);
+}
+
+// Create Particles
+function createParticles() {
+    const positions = new Float32Array(CONFIG.particleCount * 3);
+    const colors = new Float32Array(CONFIG.particleCount * 3);
+    
+    for (let i = 0; i < CONFIG.particleCount; i++) {
+        const i3 = i * 3;
+        const t = Math.random();
+        const angle = t * Math.PI * 2 * CONFIG.spiralArms;
+        const radius = t * CONFIG.maxRadius;
+        const armOffset = (i % CONFIG.spiralArms) * (Math.PI * 2 / CONFIG.spiralArms);
+        
+        positions[i3] = Math.cos(angle + armOffset) * radius;
+        positions[i3 + 1] = (Math.random() - 0.5) * 0.5;
+        positions[i3 + 2] = Math.sin(angle + armOffset) * radius;
+        
+        // Color based on distance from center
+        const hue = (t * 0.3 + 0.5) % 1;
+        const color = new THREE.Color().setHSL(hue, 0.8, 0.6);
+        colors[i3] = color.r;
+        colors[i3 + 1] = color.g;
+        colors[i3 + 2] = color.b;
     }
     
-    const template = templates[templateName];
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(template.count * 3);
-    const colors = new Float32Array(template.count * 3);
+    state.geometry = new THREE.BufferGeometry();
+    state.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    state.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     
-    particleVelocities = [];
-    targetPositions = [];
-    
-    for (let i = 0; i < template.count; i++) {
-        const pos = getTemplatePosition(templateName, i, template.count);
-        positions[i * 3] = pos.x;
-        positions[i * 3 + 1] = pos.y;
-        positions[i * 3 + 2] = pos.z;
-        
-        targetPositions.push(pos);
-        
-        const color = new THREE.Color(template.color);
-        colors[i * 3] = color.r;
-        colors[i * 3 + 1] = color.g;
-        colors[i * 3 + 2] = color.b;
-        
-        particleVelocities.push({
-            x: (Math.random() - 0.5) * 0.02,
-            y: (Math.random() - 0.5) * 0.02,
-            z: (Math.random() - 0.5) * 0.02
-        });
-    }
-    
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    
-    const material = new THREE.PointsMaterial({
-        size: 0.5,
+    state.material = new THREE.PointsMaterial({
+        size: 0.05,
         vertexColors: true,
         transparent: true,
         opacity: 0.8,
         blending: THREE.AdditiveBlending
     });
     
-    particleSystem = new THREE.Points(geometry, material);
-    scene.add(particleSystem);
-    particles = geometry;
+    state.particles = new THREE.Points(state.geometry, state.material);
+    state.scene.add(state.particles);
+}
+
+// Setup MediaPipe
+function setupMediaPipe() {
+    const hands = new Hands({
+        locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }
+    });
     
-    currentTemplate = templateName;
-    document.getElementById('currentTemplate').textContent = templateName;
-}
-
-function getTemplatePosition(template, index, total) {
-    const t = (index / total) * Math.PI * 2;
-    const radius = 15;
+    hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.5
+    });
     
-    switch(template) {
-        case 'spiral':
-            return {
-                x: Math.cos(t * 5) * radius * (index / total),
-                y: Math.sin(t * 5) * radius * (index / total),
-                z: (index / total) * 20 - 10
-            };
-        
-        case 'heart':
-            const heartT = t * 2;
-            return {
-                x: 16 * Math.pow(Math.sin(heartT), 3) * 0.8,
-                y: (13 * Math.cos(heartT) - 5 * Math.cos(2 * heartT) - 2 * Math.cos(3 * heartT) - Math.cos(4 * heartT)) * 0.8,
-                z: Math.sin(t * 3) * 5
-            };
-        
-        case 'flower':
-            const petalT = t * 8;
-            const r = radius * (1 + 0.5 * Math.sin(petalT));
-            return {
-                x: r * Math.cos(t),
-                y: r * Math.sin(t),
-                z: Math.cos(petalT) * 3
-            };
-        
-        case 'saturn':
-            if (index < total * 0.3) {
-                const sphereT = (index / (total * 0.3)) * Math.PI * 2;
-                const spherePhi = Math.acos(2 * (index / (total * 0.3)) - 1);
-                return {
-                    x: 8 * Math.sin(spherePhi) * Math.cos(sphereT),
-                    y: 8 * Math.sin(spherePhi) * Math.sin(sphereT),
-                    z: 8 * Math.cos(spherePhi)
-                };
-            } else {
-                const ringT = ((index - total * 0.3) / (total * 0.7)) * Math.PI * 2;
-                const ringRadius = 12 + Math.random() * 6;
-                return {
-                    x: ringRadius * Math.cos(ringT),
-                    y: Math.sin(ringT * 10) * 0.5,
-                    z: ringRadius * Math.sin(ringT)
-                };
-            }
-        
-        case 'fireworks':
-            const burst = Math.floor(index / (total / 5));
-            const burstT = ((index % (total / 5)) / (total / 5)) * Math.PI * 2;
-            const burstR = (index % (total / 5)) / (total / 5) * 20;
-            const offset = burst * 15 - 30;
-            return {
-                x: burstR * Math.cos(burstT) + offset,
-                y: burstR * Math.sin(burstT) + (Math.random() - 0.5) * 10,
-                z: (Math.random() - 0.5) * 10
-            };
-        
-        case 'galaxy':
-            const armT = t * 3;
-            const armR = (index / total) * 25;
-            return {
-                x: armR * Math.cos(armT + armR * 0.2),
-                y: (Math.random() - 0.5) * 5,
-                z: armR * Math.sin(armT + armR * 0.2)
-            };
-        
-        default:
-            return { x: 0, y: 0, z: 0 };
-    }
+    hands.onResults(onHandResults);
+    
+    state.hands = hands;
+    
+    const video = document.getElementById('video');
+    state.camera = new Camera(video, {
+        onFrame: async () => {
+            await hands.send({ image: video });
+        },
+        width: 640,
+        height: 480
+    });
+    
+    state.camera.start();
 }
 
-// Initialize hand tracking
-async function initHandTracking() {
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: 'user' } 
-        });
-        
-        const videoElement = document.getElementById('video');
-        videoElement.srcObject = stream;
-        
-        const hands = new Hands({
-            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-        });
-        
-        hands.setOptions({
-            maxNumHands: 1,
-            modelComplexity: 1,
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5
-        });
-        
-        hands.onResults(onHandResults);
-        
-        const camera = new Camera(videoElement, {
-            onFrame: async () => {
-                await hands.send({ image: videoElement });
-            },
-            width: 640,
-            height: 480
-        });
-        
-        camera.start();
-        
-        document.getElementById('loading').classList.add('hidden');
-    } catch (err) {
-        console.error('Camera error:', err);
-        document.getElementById('loading').textContent = 'Camera access denied';
-    }
-}
-
+// Hand Results
 function onHandResults(results) {
+    const canvas = document.getElementById('videoCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    canvas.width = results.image.width;
+    canvas.height = results.image.height;
+    
+    ctx.save();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+    
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-        currentHand = results.multiHandLandmarks[0];
+        const landmarks = results.multiHandLandmarks[0];
         
-        const indexTip = currentHand[8];
-        const thumbTip = currentHand[4];
-        const middleTip = currentHand[12];
-        const ringTip = currentHand[16];
-        const pinkyTip = currentHand[20];
+        // Draw hand
+        drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {color: '#00ff00', lineWidth: 2});
+        drawLandmarks(ctx, landmarks, {color: '#ff0000', lineWidth: 1});
         
+        // Get hand position (palm center)
+        const palmCenter = landmarks[9];
+        state.handPosition.x = (palmCenter.x - 0.5) * 2;
+        state.handPosition.y = -(palmCenter.y - 0.5) * 2;
+        
+        // Detect pinch
+        const thumb = landmarks[4];
+        const index = landmarks[8];
         const distance = Math.sqrt(
-            Math.pow(indexTip.x - thumbTip.x, 2) + 
-            Math.pow(indexTip.y - thumbTip.y, 2)
+            Math.pow(thumb.x - index.x, 2) + 
+            Math.pow(thumb.y - index.y, 2)
         );
         
-        const fingerCount = [
-            indexTip.y < currentHand[6].y,
-            middleTip.y < currentHand[10].y,
-            ringTip.y < currentHand[14].y,
-            pinkyTip.y < currentHand[18].y
-        ].filter(Boolean).length;
+        const wasPinching = state.isPinching;
+        state.isPinching = distance < CONFIG.pinchThreshold;
         
-        const now = Date.now();
-        
-        if (distance < 0.05) {
-            updateStatus('Pinch detected - Expanding particles!');
-        } else if (fingerCount === 2 && now - lastGestureChange > 2000) {
-            const templateNames = Object.keys(templates);
-            const currentIndex = templateNames.indexOf(currentTemplate);
-            const newIndex = (currentIndex + 1) % templateNames.length;
-            const newTemplate = templateNames[newIndex];
-            
-            createParticles(newTemplate);
-            updateStatus(`Peace sign - Switched to ${newTemplate}!`);
-            lastGestureChange = now;
-        } else if (fingerCount >= 3) {
-            updateStatus('Open hand - Normal flow');
-        } else {
-            updateStatus('Hand detected');
+        if (state.isPinching && !wasPinching) {
+            state.targetExpand = state.targetExpand === 1 ? 2 : 1;
+            showToast(state.targetExpand === 2 ? 'Expanding!' : 'Contracting!');
         }
-    } else {
-        currentHand = null;
-        updateStatus('Waiting for hand...');
+        
+        // Update rotation based on hand movement
+        state.rotationSpeed.y = state.handPosition.x * 0.02;
+        state.rotationSpeed.x = state.handPosition.y * 0.02;
     }
+    
+    ctx.restore();
 }
 
-function updateStatus(text) {
-    document.getElementById('status').textContent = text;
-}
-
+// Animation Loop
 function animate() {
     requestAnimationFrame(animate);
     
-    if (particles) {
-        const positions = particles.attributes.position.array;
-        const colors = particles.attributes.color.array;
+    if (state.particles) {
+        // Smooth expand
+        state.expandFactor += (state.targetExpand - state.expandFactor) * CONFIG.expandSpeed;
+        state.particles.scale.setScalar(state.expandFactor);
         
-        let expansionFactor = 1;
-        let colorShift = 0;
+        // Rotation
+        state.particles.rotation.y += state.rotationSpeed.y;
+        state.particles.rotation.x += state.rotationSpeed.x;
         
-        if (currentHand) {
-            const indexTip = currentHand[8];
-            const thumbTip = currentHand[4];
-            const distance = Math.sqrt(
-                Math.pow(indexTip.x - thumbTip.x, 2) + 
-                Math.pow(indexTip.y - thumbTip.y, 2)
-            );
-            
-            if (distance < 0.05) {
-                expansionFactor = 2 + Math.sin(Date.now() * 0.005);
-                colorShift = Date.now() * 0.001;
+        // Damping
+        state.rotationSpeed.x *= CONFIG.rotationDamping;
+        state.rotationSpeed.y *= CONFIG.rotationDamping;
+        
+        // Color cycle on pinch
+        if (state.isPinching) {
+            const colors = state.geometry.attributes.color;
+            const time = Date.now() * 0.001;
+            for (let i = 0; i < colors.count; i++) {
+                const hue = (i / colors.count + time * 0.1) % 1;
+                const color = new THREE.Color().setHSL(hue, 0.8, 0.6);
+                colors.setXYZ(i, color.r, color.g, color.b);
             }
-            
-            const palmX = (currentHand[0].x - 0.5) * 100;
-            const palmY = -(currentHand[0].y - 0.5) * 100;
-            
-            particleSystem.rotation.y += (palmX - particleSystem.rotation.y) * 0.05;
-            particleSystem.rotation.x += (palmY - particleSystem.rotation.x) * 0.05;
-        }
-        
-        for (let i = 0; i < positions.length / 3; i++) {
-            const target = targetPositions[i];
-            const vel = particleVelocities[i];
-            
-            positions[i * 3] += vel.x;
-            positions[i * 3 + 1] += vel.y;
-            positions[i * 3 + 2] += vel.z;
-            
-            const dx = (target.x * expansionFactor) - positions[i * 3];
-            const dy = (target.y * expansionFactor) - positions[i * 3 + 1];
-            const dz = (target.z * expansionFactor) - positions[i * 3 + 2];
-            
-            vel.x += dx * 0.001;
-            vel.y += dy * 0.001;
-            vel.z += dz * 0.001;
-            
-            vel.x *= 0.95;
-            vel.y *= 0.95;
-            vel.z *= 0.95;
-            
-            if (colorShift > 0) {
-                const hue = (i / (positions.length / 3) + colorShift) % 1;
-                const color = new THREE.Color().setHSL(hue, 1, 0.5);
-                colors[i * 3] = color.r;
-                colors[i * 3 + 1] = color.g;
-                colors[i * 3 + 2] = color.b;
-            }
-        }
-        
-        particles.attributes.position.needsUpdate = true;
-        if (colorShift > 0) {
-            particles.attributes.color.needsUpdate = true;
+            colors.needsUpdate = true;
         }
     }
     
-    if (particleSystem) {
-        particleSystem.rotation.y += 0.001;
+    state.renderer.render(state.scene, state.camera3d);
+}
+
+// Event Listeners
+function setupEventListeners() {
+    document.addEventListener('keydown', (e) => {
+        switch(e.key.toLowerCase()) {
+            case ' ':
+                e.preventDefault();
+                state.targetExpand = state.targetExpand === 1 ? 2 : 1;
+                showToast(state.targetExpand === 2 ? 'Expanding!' : 'Contracting!');
+                break;
+            case 'r':
+                resetView();
+                break;
+        }
+    });
+}
+
+// Utilities
+function onResize() {
+    state.camera3d.aspect = window.innerWidth / window.innerHeight;
+    state.camera3d.updateProjectionMatrix();
+    state.renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function resetView() {
+    state.particles.rotation.set(0, 0, 0);
+    state.rotationSpeed = { x: 0, y: 0 };
+    state.targetExpand = 1;
+    showToast('View reset!');
+}
+
+function hideLoading() {
+    const loading = document.getElementById('loading');
+    loading.classList.add('hidden');
+    setTimeout(() => loading.style.display = 'none', 500);
+}
+
+function updateStatus(text, active) {
+    document.getElementById('statusText').textContent = text;
+    const dot = document.getElementById('statusDot');
+    if (active) {
+        dot.classList.add('active');
+    } else {
+        dot.classList.remove('active');
     }
-    
-    renderer.render(scene, camera);
 }
 
-function handleResize() {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
+function showToast(msg) {
+    const toast = document.getElementById('toast');
+    const toastMsg = document.getElementById('toastMsg');
+    toastMsg.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2000);
 }
 
-window.addEventListener('resize', handleResize);
-
-// Start everything when page loads
-window.addEventListener('DOMContentLoaded', () => {
-    initThree();
-    initHandTracking();
-    animate();
-});
-
+// Start
+init();
